@@ -1,0 +1,184 @@
+{
+  "name": "Interstellar Co — AWS Architecture",
+  "nodes": [
+    {
+      "id": "aws_cloud",
+      "label": "AWS Cloud",
+      "icon": "/icons/aws/general/internet-alt1.png",
+      "type": "container",
+      "x": 80,
+      "y": 80,
+      "width": 1560,
+      "height": 940
+    },
+    {
+      "id": "user",
+      "label": "End User",
+      "subtitle": "HTTPS",
+      "icon": "/icons/aws/general/user.png",
+      "type": "resource",
+      "x": -200,
+      "y": 400
+    },
+    {
+      "id": "global_grp",
+      "label": "Global Services",
+      "icon": "/icons/aws/general/internet-alt2.png",
+      "type": "container",
+      "x": 90,
+      "y": 90,
+      "width": 520,
+      "height": 580,
+      "parentId": "aws_cloud"
+    },
+    {
+      "id": "cloudfront",
+      "label": "CloudFront",
+      "subtitle": "CDN + HTTPS",
+      "icon": "/icons/aws/network/cloudfront.png",
+      "type": "resource",
+      "x": 90,
+      "y": 90,
+      "parentId": "global_grp"
+    },
+    {
+      "id": "acm",
+      "label": "ACM Certificate",
+      "subtitle": "us-east-1 / TLS 1.2+",
+      "icon": "/icons/aws/security/certificate-manager.png",
+      "type": "resource",
+      "x": 310,
+      "y": 90,
+      "parentId": "global_grp"
+    },
+    {
+      "id": "iam_role",
+      "label": "IAM Deploy Role",
+      "x": 90,
+      "y": 340,
+      "subtitle": "Least-privilege",
+      "icon": "/icons/aws/security/identity-and-access-management-iam-role.png",
+      "type": "resource",
+      "parentId": "global_grp"
+    },
+    {
+      "id": "region_grp",
+      "label": "us-east-1",
+      "icon": "/icons/aws/general/internet-alt2.png",
+      "type": "container",
+      "x": 710,
+      "y": 90,
+      "width": 760,
+      "height": 760,
+      "parentId": "aws_cloud"
+    },
+    {
+      "id": "oac",
+      "label": "Origin Access Control",
+      "subtitle": "SigV4 Signed",
+      "icon": "/icons/aws/security/shield.png",
+      "type": "resource",
+      "x": 90,
+      "y": 90,
+      "parentId": "region_grp"
+    },
+    {
+      "id": "s3",
+      "label": "S3 Bucket",
+      "subtitle": "Private / AES-256",
+      "icon": "/icons/aws/storage/simple-storage-service-s3-bucket.png",
+      "type": "resource",
+      "x": 310,
+      "y": 90,
+      "parentId": "region_grp",
+      "decorators": [
+        {
+          "icon": "/icons/aws/general/ssl-padlock.png",
+          "position": "bottom-right",
+          "tooltip": "AES-256 encrypted"
+        },
+        {
+          "icon": "/icons/aws/security/shield.png",
+          "position": "bottom-left",
+          "tooltip": "Block public access enabled"
+        }
+      ]
+    },
+    {
+      "id": "tf_grp",
+      "label": "Terraform State & Locking",
+      "icon": "/icons/aws/general/internet-alt2.png",
+      "type": "container",
+      "x": 90,
+      "y": 340,
+      "width": 580,
+      "height": 330,
+      "parentId": "region_grp"
+    },
+    {
+      "id": "tfstate_s3",
+      "label": "State Bucket",
+      "subtitle": "Encrypted / Versioned",
+      "icon": "/icons/aws/storage/simple-storage-service-s3-bucket.png",
+      "type": "resource",
+      "x": 90,
+      "y": 90,
+      "parentId": "tf_grp",
+      "decorators": [
+        {
+          "icon": "/icons/aws/general/ssl-padlock.png",
+          "position": "bottom-right",
+          "tooltip": "Server-side encryption enabled"
+        }
+      ]
+    },
+    {
+      "id": "dynamo",
+      "label": "DynamoDB",
+      "subtitle": "State Lock Table",
+      "icon": "/icons/aws/database/dynamodb.png",
+      "type": "resource",
+      "x": 370,
+      "y": 90,
+      "parentId": "tf_grp"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_user_cf",
+      "source": "user",
+      "target": "cloudfront",
+      "label": "HTTPS"
+    },
+    {
+      "id": "e_acm_cf",
+      "source": "acm",
+      "target": "cloudfront",
+      "label": "TLS cert"
+    },
+    {
+      "id": "e_cf_oac",
+      "source": "cloudfront",
+      "target": "oac",
+      "label": "origin request"
+    },
+    {
+      "id": "e_oac_s3",
+      "source": "oac",
+      "target": "s3",
+      "label": "SigV4 signed"
+    },
+    {
+      "id": "e_iam_s3",
+      "source": "iam_role",
+      "target": "s3",
+      "label": "s3:PutObject"
+    },
+    {
+      "id": "e_iam_cf",
+      "source": "iam_role",
+      "target": "cloudfront",
+      "label": "CreateInvalidation"
+    }
+  ]
+}
