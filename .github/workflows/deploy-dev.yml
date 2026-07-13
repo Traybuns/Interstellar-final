@@ -1,0 +1,58 @@
+# ── .github/workflows/deploy-dev.yml ─────────────────────────
+# Triggered automatically on push to main.
+# Pipeline: terraform apply dev → sync website files → CloudFront invalidation.
+#
+# Required GitHub secrets (repo level):
+#   DEV_TF_ROLE_ARN
+#   DEV_TF_STATE_BUCKET
+#   DEV_TF_STATE_KEY          e.g. dev/terraform.tfstate
+#   DEV_TF_LOCK_TABLE         e.g. interstellar-co-tflock-dev
+#   DEV_DEPLOY_ROLE_ARN
+#
+# GitHub environment "dev" must be created in repo Settings > Environments.
+# No protection rules needed for dev — it deploys automatically.
+
+name: Deploy dev
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "interstellar-co/**"
+      - "website/**"
+      - ".github/workflows/deploy-dev.yml"
+      - ".github/workflows/_terraform.yml"
+      - ".github/workflows/_deploy.yml"
+
+concurrency:
+  group: deploy-dev
+  cancel-in-progress: false  # Don't cancel mid-apply; queue instead
+
+jobs:
+  terraform:
+    name: Terraform apply (dev)
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      environment: dev
+      working_directory: interstellar-co/environments/dev
+      aws_region: eu-north-1
+      apply: true
+    secrets:
+      TF_ROLE_ARN: ${{ secrets.DEV_TF_ROLE_ARN }}
+      TF_STATE_BUCKET: ${{ secrets.DEV_TF_STATE_BUCKET }}
+      TF_STATE_KEY: ${{ secrets.DEV_TF_STATE_KEY }}
+      TF_LOCK_TABLE: ${{ secrets.DEV_TF_LOCK_TABLE }}
+
+  deploy:
+    name: Deploy website (dev)
+    needs: terraform
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: dev
+      aws_region: eu-north-1
+      website_bucket_name: ${{ needs.terraform.outputs.website_bucket_name }}
+      cloudfront_distribution_id: ${{ needs.terraform.outputs.cloudfront_distribution_id }}
+      source_dir: website
+    secrets:
+      DEPLOY_ROLE_ARN: ${{ secrets.DEV_DEPLOY_ROLE_ARN }}

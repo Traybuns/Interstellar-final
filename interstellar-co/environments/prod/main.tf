@@ -51,6 +51,10 @@ module "iam" {
   project                     = var.project
   s3_bucket_arn               = module.s3.bucket_arn
   cloudfront_distribution_arn = module.cloudfront.distribution_arn
+  tf_state_bucket_arn         = "arn:aws:s3:::${var.tf_state_bucket_name}"
+
+  create_oidc_provider = var.create_oidc_provider
+  github_oidc_subjects = var.github_oidc_subjects
 
   tags = {
     Environment = var.environment
@@ -97,6 +101,11 @@ output "cloudfront_distribution_id" {
 }
 
 output "deploy_role_arn" {
-  description = "IAM deploy role ARN for the production CI/CD pipeline."
+  description = "IAM deploy role ARN for the GitHub Actions deploy step (S3 sync + CloudFront invalidation)."
   value       = module.iam.deploy_role_arn
+}
+
+output "terraform_role_arn" {
+  description = "IAM Terraform role ARN for the GitHub Actions terraform plan/apply steps."
+  value       = module.iam.terraform_role_arn
 }

@@ -1,0 +1,75 @@
+# ── .github/workflows/deploy-prod.yml ────────────────────────
+# Manual trigger only. Must be explicitly dispatched — never runs automatically.
+#
+# Required GitHub secrets (repo level):
+#   PROD_TF_ROLE_ARN
+#   PROD_TF_STATE_BUCKET
+#   PROD_TF_STATE_KEY           e.g. prod/terraform.tfstate
+#   PROD_TF_LOCK_TABLE          e.g. interstellar-co-tflock-prod
+#   PROD_DEPLOY_ROLE_ARN
+#
+# GitHub environment "prod" must be created in repo Settings > Environments.
+# STRONGLY RECOMMENDED:
+#   - Add required reviewers (at least one approver before secrets are released)
+#   - Add a deployment branch rule: only allow from "main"
+#   - Set a wait timer if you want a cool-off period between trigger and run
+
+name: Deploy prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Reason for deploying to production"
+        required: true
+        type: string
+      confirm:
+        description: "Type 'prod' to confirm production deployment"
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false   # Never cancel a prod apply in flight
+
+jobs:
+  guard:
+    name: Confirm production deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate confirmation input
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "prod" ]; then
+            echo "ERROR: Confirmation input must be exactly 'prod'. Got: ${{ github.event.inputs.confirm }}"
+            exit 1
+          fi
+          echo "Confirmation accepted. Deploying to production."
+          echo "Reason: ${{ github.event.inputs.reason }}"
+
+  terraform:
+    name: Terraform apply (prod)
+    needs: guard
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      environment: prod
+      working_directory: interstellar-co/environments/prod
+      aws_region: eu-north-1
+      apply: true
+    secrets:
+      TF_ROLE_ARN: ${{ secrets.PROD_TF_ROLE_ARN }}
+      TF_STATE_BUCKET: ${{ secrets.PROD_TF_STATE_BUCKET }}
+      TF_STATE_KEY: ${{ secrets.PROD_TF_STATE_KEY }}
+      TF_LOCK_TABLE: ${{ secrets.PROD_TF_LOCK_TABLE }}
+
+  deploy:
+    name: Deploy website (prod)
+    needs: terraform
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: prod
+      aws_region: eu-north-1
+      website_bucket_name: ${{ needs.terraform.outputs.website_bucket_name }}
+      cloudfront_distribution_id: ${{ needs.terraform.outputs.cloudfront_distribution_id }}
+      source_dir: website
+    secrets:
+      DEPLOY_ROLE_ARN: ${{ secrets.PROD_DEPLOY_ROLE_ARN }}

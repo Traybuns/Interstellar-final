@@ -1,0 +1,57 @@
+# ── .github/workflows/deploy-staging.yml ─────────────────────
+# Manual trigger only (workflow_dispatch). Typically run after dev
+# has been validated.
+#
+# Required GitHub secrets (repo level):
+#   STAGING_TF_ROLE_ARN
+#   STAGING_TF_STATE_BUCKET
+#   STAGING_TF_STATE_KEY        e.g. staging/terraform.tfstate
+#   STAGING_TF_LOCK_TABLE       e.g. interstellar-co-tflock-staging
+#   STAGING_DEPLOY_ROLE_ARN
+#
+# GitHub environment "staging" must be created in repo Settings > Environments.
+# Recommended: add required reviewers to the staging environment so a team
+# member must approve before the workflow can access environment secrets.
+
+name: Deploy staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Reason for deploying to staging"
+        required: false
+        type: string
+        default: "Manual staging deploy"
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  terraform:
+    name: Terraform apply (staging)
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      environment: staging
+      working_directory: interstellar-co/environments/staging
+      aws_region: eu-north-1
+      apply: true
+    secrets:
+      TF_ROLE_ARN: ${{ secrets.STAGING_TF_ROLE_ARN }}
+      TF_STATE_BUCKET: ${{ secrets.STAGING_TF_STATE_BUCKET }}
+      TF_STATE_KEY: ${{ secrets.STAGING_TF_STATE_KEY }}
+      TF_LOCK_TABLE: ${{ secrets.STAGING_TF_LOCK_TABLE }}
+
+  deploy:
+    name: Deploy website (staging)
+    needs: terraform
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: staging
+      aws_region: eu-north-1
+      website_bucket_name: ${{ needs.terraform.outputs.website_bucket_name }}
+      cloudfront_distribution_id: ${{ needs.terraform.outputs.cloudfront_distribution_id }}
+      source_dir: website
+    secrets:
+      DEPLOY_ROLE_ARN: ${{ secrets.STAGING_DEPLOY_ROLE_ARN }}
