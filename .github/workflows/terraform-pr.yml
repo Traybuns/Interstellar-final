@@ -1,0 +1,75 @@
+# ── .github/workflows/terraform-pr.yml ───────────────────────
+# Triggered on pull requests that touch Terraform files.
+# Runs terraform plan for all affected environments and posts the
+# plan output as a PR comment. Does NOT apply.
+#
+# Required GitHub secrets (repo level):
+#   DEV_TF_ROLE_ARN          IAM Terraform role ARN for dev
+#   DEV_TF_STATE_BUCKET      S3 state bucket name for dev
+#   DEV_TF_STATE_KEY         State file key for dev (e.g. dev/terraform.tfstate)
+#   DEV_TF_LOCK_TABLE        DynamoDB lock table name for dev
+#   STAGING_TF_ROLE_ARN      (same pattern for staging)
+#   STAGING_TF_STATE_BUCKET
+#   STAGING_TF_STATE_KEY
+#   STAGING_TF_LOCK_TABLE
+#   PROD_TF_ROLE_ARN         (same pattern for prod)
+#   PROD_TF_STATE_BUCKET
+#   PROD_TF_STATE_KEY
+#   PROD_TF_LOCK_TABLE
+
+name: Terraform Plan (PR)
+
+on:
+  pull_request:
+    paths:
+      - "interstellar-co/**/*.tf"
+      - "interstellar-co/**/*.tfvars"
+      - ".github/workflows/terraform-pr.yml"
+      - ".github/workflows/_terraform.yml"
+
+concurrency:
+  group: terraform-plan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan-dev:
+    name: Plan dev
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      environment: dev
+      working_directory: interstellar-co/environments/dev
+      aws_region: eu-north-1
+      apply: false
+    secrets:
+      TF_ROLE_ARN: ${{ secrets.DEV_TF_ROLE_ARN }}
+      TF_STATE_BUCKET: ${{ secrets.DEV_TF_STATE_BUCKET }}
+      TF_STATE_KEY: ${{ secrets.DEV_TF_STATE_KEY }}
+      TF_LOCK_TABLE: ${{ secrets.DEV_TF_LOCK_TABLE }}
+
+  plan-staging:
+    name: Plan staging
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      environment: staging
+      working_directory: interstellar-co/environments/staging
+      aws_region: eu-north-1
+      apply: false
+    secrets:
+      TF_ROLE_ARN: ${{ secrets.STAGING_TF_ROLE_ARN }}
+      TF_STATE_BUCKET: ${{ secrets.STAGING_TF_STATE_BUCKET }}
+      TF_STATE_KEY: ${{ secrets.STAGING_TF_STATE_KEY }}
+      TF_LOCK_TABLE: ${{ secrets.STAGING_TF_LOCK_TABLE }}
+
+  plan-prod:
+    name: Plan prod
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      environment: prod
+      working_directory: interstellar-co/environments/prod
+      aws_region: eu-north-1
+      apply: false
+    secrets:
+      TF_ROLE_ARN: ${{ secrets.PROD_TF_ROLE_ARN }}
+      TF_STATE_BUCKET: ${{ secrets.PROD_TF_STATE_BUCKET }}
+      TF_STATE_KEY: ${{ secrets.PROD_TF_STATE_KEY }}
+      TF_LOCK_TABLE: ${{ secrets.PROD_TF_LOCK_TABLE }}

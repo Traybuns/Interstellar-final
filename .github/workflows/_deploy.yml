@@ -1,0 +1,77 @@
+# ── .github/workflows/_deploy.yml ────────────────────────────
+# Reusable workflow: sync website files to S3 and invalidate CloudFront.
+#
+# Called after terraform apply succeeds. Not triggered directly.
+
+name: Deploy website (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "Target environment (dev | staging | prod)"
+        required: true
+        type: string
+      aws_region:
+        description: "AWS region for the environment"
+        required: true
+        type: string
+      website_bucket_name:
+        description: "S3 bucket name to sync files into"
+        required: true
+        type: string
+      cloudfront_distribution_id:
+        description: "CloudFront distribution ID for cache invalidation"
+        required: true
+        type: string
+      source_dir:
+        description: "Local directory of website files to upload"
+        required: false
+        type: string
+        default: "website"
+    secrets:
+      DEPLOY_ROLE_ARN:
+        description: "ARN of the IAM role to assume for S3 + CloudFront operations"
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy website (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
+          aws-region: ${{ inputs.aws_region }}
+          role-session-name: github-actions-deploy-${{ inputs.environment }}
+
+      - name: Sync website files to S3
+        run: |
+          aws s3 sync "${{ inputs.source_dir }}/" "s3://${{ inputs.website_bucket_name }}/" \
+            --delete \
+            --cache-control "public, max-age=31536000, immutable" \
+            --exclude "*.html" \
+            --exclude "*.json"
+
+          # HTML and JSON get a shorter TTL so users get fresh content on deploy
+          aws s3 sync "${{ inputs.source_dir }}/" "s3://${{ inputs.website_bucket_name }}/" \
+            --delete \
+            --cache-control "no-cache, no-store, must-revalidate" \
+            --include "*.html" \
+            --include "*.json"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id "${{ inputs.cloudfront_distribution_id }}" \
+            --paths "/*"

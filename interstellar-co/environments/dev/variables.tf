@@ -40,3 +40,20 @@ variable "domain_aliases" {
   type        = list(string)
   default     = []
 }
+
+variable "tf_state_bucket_name" {
+  description = "Name of the S3 bucket that holds Terraform state for this environment."
+  type        = string
+}
+
+variable "create_oidc_provider" {
+  description = "Create the GitHub Actions OIDC provider in this account. Set false if another env already created it."
+  type        = bool
+  default     = true
+}
+
+variable "github_oidc_subjects" {
+  description = "OIDC subject claims allowed to assume the deploy and Terraform roles."
+  type        = list(string)
+  default     = ["repo:Traybuns/Interstellar-web:*"]
+}

@@ -16,23 +16,57 @@ variable "project" {
 }
 
 variable "s3_bucket_arn" {
-  description = "ARN of the website S3 bucket the deploy role must be able to read/write."
+  description = "ARN of the website S3 bucket the deploy role must read/write."
   type        = string
 }
 
 variable "cloudfront_distribution_arn" {
-  description = "ARN of the CloudFront distribution the deploy role must be able to create invalidations on."
+  description = "ARN of the CloudFront distribution the deploy role must create invalidations on."
   type        = string
 }
 
-variable "trusted_account_ids" {
+variable "tf_state_bucket_arn" {
+  description = "ARN of the S3 bucket used for Terraform state. The Terraform role needs read/write access."
+  type        = string
+}
+
+# ── OIDC ───────────────────────────────────────────────────── #
+
+variable "create_oidc_provider" {
   description = <<-EOT
-    List of AWS account IDs allowed to assume the deploy role.
-    Typically the account running your CI/CD pipeline.
-    Defaults to the current account (self-trust).
+    Whether to create the GitHub Actions OIDC provider in this AWS account.
+    Set to true for the first environment bootstrapped in an account.
+    Set to false for additional environments sharing the same account —
+    the provider can only exist once per account; subsequent creates fail.
+  EOT
+  type    = bool
+  default = true
+}
+
+variable "oidc_provider_arn" {
+  description = <<-EOT
+    ARN of an existing GitHub OIDC provider. Required when
+    create_oidc_provider = false. Ignored otherwise.
+  EOT
+  type    = string
+  default = ""
+}
+
+variable "github_oidc_subjects" {
+  description = <<-EOT
+    List of GitHub Actions OIDC subject claim values allowed to assume
+    BOTH the deploy role and the Terraform role.
+
+    Examples:
+      - "repo:Traybuns/Interstellar-web:environment:dev"        (environment-scoped)
+      - "repo:Traybuns/Interstellar-web:ref:refs/heads/main"    (branch-scoped)
+      - "repo:Traybuns/Interstellar-web:*"                      (any workflow in repo)
+
+    Use the most restrictive form that fits your workflow. Environment-scoped
+    claims require GitHub environment protection rules to be configured.
   EOT
   type    = list(string)
-  default = []
+  default = ["repo:Traybuns/Interstellar-web:*"]
 }
 
 variable "tags" {
