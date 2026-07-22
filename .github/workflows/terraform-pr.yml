@@ -27,6 +27,11 @@ on:
       - ".github/workflows/terraform-pr.yml"
       - ".github/workflows/_terraform.yml"
 
+permissions:
+  id-token: write   # Required for OIDC — passed through to the reusable workflow
+  contents: read
+  pull-requests: write  # Allows the plan job to post PR comments
+
 concurrency:
   group: terraform-plan-${{ github.ref }}
   cancel-in-progress: true
