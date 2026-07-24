@@ -25,6 +25,10 @@ on:
       - ".github/workflows/_terraform.yml"
       - ".github/workflows/_deploy.yml"
 
+permissions:
+  id-token: write   # Required for OIDC authentication to AWS
+  contents: read
+
 concurrency:
   group: deploy-dev
   cancel-in-progress: false  # Don't cancel mid-apply; queue instead
