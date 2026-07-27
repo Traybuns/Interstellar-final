@@ -10,6 +10,7 @@ project                = "interstellar-co"
 
 # Bucket name must be globally unique across all of AWS.
 website_bucket_name    = "interstellar-co-website-dev"
+tf_state_bucket_name = "interstellar-co-tfstate-dev"
 
 # PriceClass_100 = US + Europe edge locations. Lowest cost option.
 cloudfront_price_class = "PriceClass_100"
