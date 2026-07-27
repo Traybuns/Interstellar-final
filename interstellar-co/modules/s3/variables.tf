@@ -22,14 +22,9 @@ variable "project" {
 }
 
 variable "cloudfront_distribution_arn" {
-  description = <<-EOT
-    ARN of the CloudFront distribution that is allowed to read from this bucket.
-    Used to build the bucket policy that restricts access to CloudFront OAC only.
-    Pass an empty string to skip the bucket-policy resource (useful during bootstrap
-    when CloudFront does not exist yet).
-  EOT
-  type    = string
-  default = ""
+  description = "ARN of the CloudFront distribution allowed to read from this bucket. Used to build the OAC bucket policy restricting S3 access to this distribution only."
+  type        = string
+  default     = ""
 }
 
 variable "tags" {

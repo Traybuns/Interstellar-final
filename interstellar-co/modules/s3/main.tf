@@ -72,12 +72,9 @@ resource "aws_s3_bucket_ownership_controls" "website" {
 }
 
 # ── Bucket policy: allow CloudFront OAC to read objects ───── #
-# Only created once a CloudFront distribution ARN is supplied.
 # The aws:SourceArn condition ensures only *this specific* distribution
 # can use the OAC service principal — prevents confused-deputy attacks.
 resource "aws_s3_bucket_policy" "cloudfront_oac" {
-  count = var.cloudfront_distribution_arn != "" ? 1 : 0
-
   bucket = aws_s3_bucket.website.id
 
   policy = jsonencode({

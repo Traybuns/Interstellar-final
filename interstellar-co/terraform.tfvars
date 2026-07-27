@@ -26,4 +26,4 @@ domain_aliases         = []
 create_oidc_provider   = true
 
 # Allow any workflow in this repo to assume the deploy and Terraform roles.
-github_oidc_subjects   = ["repo:Traybuns/Interstellar-deployment:*"]
+github_oidc_subjects   = ["repo:Traybuns/Interstellar-final:*"]
