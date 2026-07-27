@@ -58,15 +58,15 @@ variable "github_oidc_subjects" {
     BOTH the deploy role and the Terraform role.
 
     Examples:
-      - "repo:Traybuns/Interstellar-web:environment:dev"        (environment-scoped)
-      - "repo:Traybuns/Interstellar-web:ref:refs/heads/main"    (branch-scoped)
-      - "repo:Traybuns/Interstellar-web:*"                      (any workflow in repo)
+      - "repo:Traybuns/Interstellar-deployment:environment:dev"        (environment-scoped)
+      - "repo:Traybuns/Interstellar-deployment:ref:refs/heads/main"    (branch-scoped)
+      - "repo:Traybuns/Interstellar-deployment:*"                      (any workflow in repo)
 
     Use the most restrictive form that fits your workflow. Environment-scoped
     claims require GitHub environment protection rules to be configured.
   EOT
   type    = list(string)
-  default = ["repo:Traybuns/Interstellar-web:*"]
+  default = ["repo:Traybuns/Interstellar-deployment:*"]
 }
 
 variable "tags" {

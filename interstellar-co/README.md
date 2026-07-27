@@ -1,62 +1,64 @@
-# Interstellar Co — Website Infrastructure
+# Interstellar Co — Infrastructure
 
-Static website hosted on AWS (S3 + CloudFront + OAC), with separate Terraform
-workspaces for **dev**, **staging**, and **prod**.
-
----
-
-## Project Structure
-
-```
-interstellar-co/
-├── modules/
-│   ├── s3/           Private S3 bucket (versioning, encryption, OAC policy)
-│   ├── cloudfront/   CloudFront distribution (OAC, HTTPS, custom error pages)
-│   └── iam/          Least-privilege CI/CD deploy role
-├── environments/
-│   ├── dev/          dev environment (cheapest price class, no custom domain)
-│   ├── staging/      staging environment
-│   └── prod/         prod environment (global CDN, requires ACM cert)
-├── website/
-│   ├── index.html    Static site
-│   ├── styles.css
-│   └── script.js
-└── README.md
-```
-
----
+Static website hosted on AWS via S3 + CloudFront, deployed automatically from GitHub Actions using OIDC (no long-lived access keys).
 
 ## Architecture
 
 ```
-User → CloudFront (HTTPS, OAC) → Private S3 Bucket
-                                       ↑
-                           Bucket policy: allow only
-                           this CloudFront distribution
+GitHub Actions (OIDC)
+       |
+       +-- Terraform role --> terraform plan/apply
+       |
+       +-- Deploy role -----> S3 sync + CloudFront invalidation
+                                         |
+                               CloudFront (OAC, HTTPS)
+                                         |
+                                  S3 bucket (private)
+                                  website files
 ```
 
-- **S3** bucket is never directly public. `block_public_acls = true` and
-  `restrict_public_buckets = true` are always set.
-- **CloudFront OAC** signs every request to S3 with SigV4. The bucket policy
-  uses `aws:SourceArn` to scope access to the specific distribution.
-- **HTTPS enforced** via `viewer_protocol_policy = "redirect-to-https"`.
-- **TLS 1.2+** (`TLSv1.2_2021` security policy).
-- **DynamoDB** lock table per environment prevents concurrent `terraform apply`.
-- **Remote state** stored encrypted in S3, separate bucket per environment.
+- S3 bucket is private — all public-access blocks enabled.
+- CloudFront OAC signs every request to S3 with SigV4.
+- Bucket policy scoped to the specific distribution ARN via `aws:SourceArn`.
+- HTTPS enforced; TLS 1.2+ minimum.
+- No AWS access keys stored anywhere — GitHub Actions uses OIDC.
 
----
+## Repository structure
 
-## Prerequisites
+```
+interstellar-co/
+  main.tf              Root module — wires together S3, CloudFront, IAM
+  providers.tf         AWS provider config (eu-north-1 + us-east-1 alias for CF/ACM)
+  variables.tf         Input variable declarations
+  terraform.tfvars     Non-secret variable values (safe to commit)
+  backend.hcl          Remote state config — passed to terraform init
+  modules/
+    s3/                Private website bucket + OAC bucket policy
+    cloudfront/        CloudFront distribution with OAC origin
+    iam/               OIDC deploy role + Terraform role
+  website/
+    index.html
+    styles.css
+    script.js
 
-1. AWS credentials configured (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`
-   or an IAM role via instance profile / OIDC).
-2. Bootstrap the state backend for each environment **once** (before `terraform init`):
+.github/workflows/
+  deploy.yml           Push to main → terraform apply → S3 sync → CF invalidation
+  plan-pr.yml          Pull request → terraform plan (no apply)
+  _terraform.yml       Reusable: init, validate, plan, apply
+  _deploy.yml          Reusable: S3 sync + CF invalidation
+```
+
+## First-time bootstrap
+
+Do this once, before the first GitHub Actions run.
+
+### 1. Create the S3 state bucket
 
 ```bash
-# Example bootstrap for dev (run once, manually or via a script)
 aws s3api create-bucket \
   --bucket interstellar-co-tfstate-dev \
-  --region us-east-1
+  --region eu-north-1 \
+  --create-bucket-configuration LocationConstraint=eu-north-1
 
 aws s3api put-bucket-versioning \
   --bucket interstellar-co-tfstate-dev \
@@ -66,91 +68,68 @@ aws s3api put-bucket-encryption \
   --bucket interstellar-co-tfstate-dev \
   --server-side-encryption-configuration \
   '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+```
 
+### 2. Create the DynamoDB lock table
+
+```bash
 aws dynamodb create-table \
   --table-name interstellar-co-tflock-dev \
   --attribute-definitions AttributeName=LockID,AttributeType=S \
   --key-schema AttributeName=LockID,KeyType=HASH \
   --billing-mode PAY_PER_REQUEST \
-  --region us-east-1
+  --region eu-north-1
 ```
 
-3. For **prod**: create an ACM certificate in `us-east-1` for your domain and
-   validate it via DNS before applying.
-
----
-
-## Usage
-
-### Init (once per environment, or after provider changes)
+### 3. Run the first Terraform apply locally
 
 ```bash
-cd environments/dev
+cd interstellar-co
 terraform init -backend-config=backend.hcl
+terraform plan -var="tf_state_bucket_name=interstellar-co-tfstate-dev"
+terraform apply -var="tf_state_bucket_name=interstellar-co-tfstate-dev"
 ```
 
-### Plan
+### 4. Capture role ARNs from outputs
 
 ```bash
-terraform plan -var-file=terraform.tfvars
+terraform output terraform_role_arn
+terraform output deploy_role_arn
 ```
 
-### Apply
+### 5. Add GitHub Actions secrets
 
+In repo **Settings > Secrets and variables > Actions**, add these four secrets:
+
+| Secret name        | Where to get the value                              |
+|--------------------|-----------------------------------------------------|
+| `TF_ROLE_ARN`      | `terraform output terraform_role_arn`               |
+| `DEPLOY_ROLE_ARN`  | `terraform output deploy_role_arn`                  |
+| `TF_STATE_BUCKET`  | `interstellar-co-tfstate-dev`                       |
+| `TF_LOCK_TABLE`    | `interstellar-co-tflock-dev`                        |
+
+### 6. Create the GitHub environment
+
+In repo **Settings > Environments**, create an environment named `dev`.
+No protection rules are required — the workflow deploys automatically on push to `main`.
+
+### 7. Push and verify
+
+Push any change to `main`. The `Deploy` workflow will:
+1. Run `terraform apply` (creates/updates infrastructure)
+2. Sync website files to S3
+3. Invalidate the CloudFront cache
+
+The live URL is in the Terraform outputs:
 ```bash
-terraform apply -var-file=terraform.tfvars
+terraform output cloudfront_domain
 ```
 
-### Deploy website files
+## Ongoing deployments
 
-After `terraform apply`, upload the website to S3 and invalidate the cache:
+- **Push to `main`** → full deploy pipeline runs automatically
+- **Open a PR** → `terraform plan` runs and uploads the plan as a workflow artifact (no apply)
 
-```bash
-# Get outputs
-BUCKET=$(terraform output -raw website_bucket_name)
-CF_ID=$(terraform output -raw cloudfront_distribution_id)
+## Notes on OIDC provider
 
-# Sync website files
-aws s3 sync ../../website/ s3://${BUCKET}/ \
-  --delete \
-  --cache-control "max-age=86400"
-
-# Invalidate CloudFront cache
-aws cloudfront create-invalidation \
-  --distribution-id ${CF_ID} \
-  --paths "/*"
-```
-
----
-
-## Environment Differences
-
-| Setting              | dev             | staging         | prod              |
-|----------------------|-----------------|-----------------|-------------------|
-| Price class          | PriceClass_100  | PriceClass_100  | PriceClass_All    |
-| Custom domain / ACM  | No              | Optional        | Required          |
-| force_destroy on S3  | true            | true            | false             |
-| CloudFront HTTP ver  | http2and3       | http2and3       | http2and3         |
-
----
-
-## Tagging Convention
-
-All resources are tagged with:
-
-| Tag           | Value                          |
-|---------------|--------------------------------|
-| `Environment` | `dev` / `staging` / `prod`     |
-| `Project`     | `interstellar-co`              |
-| `ManagedBy`   | `terraform`                    |
-
----
-
-## Security Notes
-
-- S3 buckets are **never public** — all public-access blocks are enabled.
-- The CloudFront OAC uses **SigV4** signing (not the legacy OAI mechanism).
-- The bucket policy uses `aws:SourceArn` to prevent confused-deputy attacks.
-- IAM deploy roles follow **least privilege** — only `s3:PutObject`,
-  `s3:DeleteObject`, `s3:ListBucket`, and `cloudfront:CreateInvalidation`.
-- State files are **encrypted at rest** (AES-256) in S3.
+The GitHub Actions OIDC identity provider is created once per AWS account by `module.iam` (`create_oidc_provider = true`). If you see `EntityAlreadyExists` on a fresh apply (provider was created by a previous run), set `create_oidc_provider = false` in `terraform.tfvars` and re-apply — it will skip creating the provider and reference the existing one.

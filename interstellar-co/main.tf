@@ -1,37 +1,28 @@
-# ── environments/dev/main.tf ────────────────────────────────
-# Dev environment root module.
+# ── interstellar-co/main.tf ──────────────────────────────────
+# Dev environment root — provisions the full static-site stack:
 #
-# Dependency order:
-#   1. module.s3          — creates the private website bucket
-#   2. module.cloudfront  — creates the CDN; outputs the distribution ARN
-#   3. module.s3 (policy) — bucket policy applied via cloudfront_distribution_arn
-#      NOTE: the OAC bucket policy is a separate aws_s3_bucket_policy resource
-#      inside the s3 module, so we must pass the CloudFront ARN back in.
-#      Terraform handles the ordering automatically via the reference.
-#   4. module.iam         — deploy role referencing both bucket and CF ARNs
+#   S3 (private bucket) → CloudFront (OAC distribution) → IAM (OIDC roles)
 #
-# Because the S3 bucket policy depends on the CloudFront distribution ARN,
-# and CloudFront depends on the S3 bucket domain, there's a natural two-pass
-# dependency. Terraform resolves this without any workarounds.
-
-# ── Terraform backend (configured via backend.hcl) ── #
-terraform {
-  backend "s3" {}
-}
+# Dependency order Terraform resolves automatically:
+#   1. module.s3          creates the bucket (no bucket policy yet)
+#   2. module.cloudfront  creates the distribution; outputs its ARN
+#   3. module.s3          applies the bucket policy using the CF ARN
+#   4. module.iam         creates deploy + terraform roles referencing both ARNs
+#
+# On the very first apply the cloudfront_distribution_arn passed to module.s3
+# is a known value (Terraform resolves the reference in-plan), so no two-pass
+# apply is required.
 
 # ── S3 Website Bucket ──────────────────────────────────────── #
-# First pass: create the bucket WITHOUT the bucket policy.
-# The policy requires the CloudFront ARN, which doesn't exist yet.
 module "s3" {
-  source = "../../modules/s3"
+  source = "./modules/s3"
 
   bucket_name = var.website_bucket_name
   environment = var.environment
   project     = var.project
 
-  # Wire in the CF ARN after CloudFront is created.
-  # On first apply this is empty → policy resource count = 0.
-  # On subsequent applies (or with -target ordering) it is populated.
+  # CloudFront ARN — wired in from module.cloudfront.
+  # Terraform resolves this dependency automatically within a single plan+apply.
   cloudfront_distribution_arn = module.cloudfront.distribution_arn
 
   tags = {
@@ -43,7 +34,7 @@ module "s3" {
 
 # ── CloudFront Distribution ────────────────────────────────── #
 module "cloudfront" {
-  source = "../../modules/cloudfront"
+  source = "./modules/cloudfront"
 
   environment                    = var.environment
   project                        = var.project
@@ -60,9 +51,9 @@ module "cloudfront" {
   }
 }
 
-# ── IAM Deploy + Terraform Roles ──────────────────────────── #
+# ── IAM — OIDC Roles for GitHub Actions ───────────────────── #
 module "iam" {
-  source = "../../modules/iam"
+  source = "./modules/iam"
 
   environment                 = var.environment
   project                     = var.project
@@ -81,12 +72,16 @@ module "iam" {
 }
 
 # ── DynamoDB State Lock Table ──────────────────────────────── #
-# Pre-provision the lock table in the same environment so it's tracked
-# in state. Note: this table is referenced by backend.hcl — if you're
-# bootstrapping for the first time, you may need to create it manually
-# or with a one-time local backend, then migrate state.
+# Tracks in-progress Terraform operations to prevent concurrent runs.
+# NOTE: This table is referenced by backend.hcl BEFORE init runs.
+#   Bootstrap sequence for a brand new account:
+#     1. Create the S3 state bucket and DynamoDB table manually (or via aws cli).
+#     2. terraform init -backend-config=backend.hcl
+#     3. terraform apply
+#   After the first apply, the table is owned by this state and future
+#   applies manage it automatically.
 resource "aws_dynamodb_table" "tf_lock" {
-  name         = "interstellar-co-tflock-${var.environment}"
+  name         = "interstellar-co-tflock-dev"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "LockID"
 
@@ -95,7 +90,6 @@ resource "aws_dynamodb_table" "tf_lock" {
     type = "S"
   }
 
-  # Protect the lock table from accidental deletion in all environments.
   lifecycle {
     prevent_destroy = true
   }
@@ -110,17 +104,17 @@ resource "aws_dynamodb_table" "tf_lock" {
 
 # ── Outputs ────────────────────────────────────────────────── #
 output "website_bucket_name" {
-  description = "Name of the website S3 bucket."
+  description = "S3 bucket name — needed by the deploy workflow to sync files."
   value       = module.s3.bucket_id
 }
 
 output "cloudfront_domain" {
-  description = "CloudFront distribution domain — use this URL to access the dev site."
+  description = "CloudFront distribution domain (e.g. d1234abcd.cloudfront.net)."
   value       = module.cloudfront.distribution_domain_name
 }
 
 output "cloudfront_distribution_id" {
-  description = "CloudFront distribution ID — needed for cache invalidation during deploy."
+  description = "CloudFront distribution ID — used for cache invalidation in the deploy workflow."
   value       = module.cloudfront.distribution_id
 }
 
@@ -130,6 +124,6 @@ output "deploy_role_arn" {
 }
 
 output "terraform_role_arn" {
-  description = "IAM role ARN for the GitHub Actions terraform plan/apply steps."
+  description = "IAM role ARN for the GitHub Actions Terraform plan/apply steps."
   value       = module.iam.terraform_role_arn
 }

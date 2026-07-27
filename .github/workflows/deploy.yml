@@ -1,0 +1,71 @@
+# ── .github/workflows/deploy.yml ─────────────────────────────
+# Triggered on push to main when Terraform or website files change.
+# Pipeline: terraform apply → sync website → CloudFront invalidation.
+#
+# ── GitHub Secrets required (set in repo Settings > Secrets > Actions) ──
+#
+#   TF_ROLE_ARN        ARN of the IAM role used for terraform plan/apply.
+#                      Produced by the first terraform apply:
+#                        terraform output terraform_role_arn
+#
+#   DEPLOY_ROLE_ARN    ARN of the IAM role used for S3 sync + CF invalidation.
+#                      Produced by the first terraform apply:
+#                        terraform output deploy_role_arn
+#
+#   TF_STATE_BUCKET    Name of the S3 bucket that holds Terraform state.
+#                      Default: interstellar-co-tfstate-dev
+#
+#   TF_LOCK_TABLE      Name of the DynamoDB table used for state locking.
+#                      Default: interstellar-co-tflock-dev
+#
+# ── GitHub Environment ──────────────────────────────────────────────────
+# Create an environment named "dev" in repo Settings > Environments.
+# No protection rules are required — this workflow deploys automatically.
+
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "interstellar-co/**"
+      - ".github/workflows/deploy.yml"
+      - ".github/workflows/_terraform.yml"
+      - ".github/workflows/_deploy.yml"
+
+# id-token: write is required for OIDC authentication to AWS.
+# This permission block must be on the CALLER (this file), not the reusable workflow.
+permissions:
+  id-token: write
+  contents: read
+
+# Prevent concurrent deploys — queue instead of cancelling a running apply.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  terraform:
+    name: Terraform apply
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      working_directory: interstellar-co
+      aws_region: eu-north-1
+      apply: true
+    secrets:
+      TF_ROLE_ARN: ${{ secrets.TF_ROLE_ARN }}
+      TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+      TF_LOCK_TABLE: ${{ secrets.TF_LOCK_TABLE }}
+
+  deploy:
+    name: Deploy website
+    needs: terraform
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      aws_region: eu-north-1
+      website_bucket_name: ${{ needs.terraform.outputs.website_bucket_name }}
+      cloudfront_distribution_id: ${{ needs.terraform.outputs.cloudfront_distribution_id }}
+      source_dir: interstellar-co/website
+    secrets:
+      DEPLOY_ROLE_ARN: ${{ secrets.DEPLOY_ROLE_ARN }}

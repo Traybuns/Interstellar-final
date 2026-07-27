@@ -1,65 +1,63 @@
 # ── .github/workflows/_terraform.yml ─────────────────────────
-# Reusable workflow: terraform init, plan, and (optionally) apply
-# for a given environment directory.
+# Reusable workflow: terraform init → validate → plan → (optional) apply.
 #
-# Called by the per-environment workflows. Not triggered directly.
+# Callers pass secrets directly — no environment-level secret inheritance
+# needed. The caller workflow must declare:
+#   permissions:
+#     id-token: write   # OIDC credential exchange with AWS
+#     contents: read
 
 name: Terraform (reusable)
 
 on:
   workflow_call:
     inputs:
-      environment:
-        description: "Target environment (dev | staging | prod)"
-        required: true
-        type: string
       working_directory:
-        description: "Path to the environment Terraform root"
+        description: "Path to the Terraform root module"
         required: true
         type: string
       aws_region:
-        description: "AWS region for the environment"
+        description: "AWS region for the deployment"
         required: true
         type: string
       apply:
-        description: "Run terraform apply after plan (true/false)"
+        description: "Run terraform apply after a successful plan"
         required: false
         type: boolean
         default: false
     secrets:
       TF_ROLE_ARN:
-        description: "ARN of the IAM role to assume for terraform operations"
+        description: "IAM role ARN to assume for Terraform operations (OIDC)"
         required: true
       TF_STATE_BUCKET:
-        description: "S3 bucket name for Terraform state"
-        required: true
-      TF_STATE_KEY:
-        description: "S3 key (path) for the Terraform state file"
+        description: "S3 bucket name for Terraform remote state"
         required: true
       TF_LOCK_TABLE:
         description: "DynamoDB table name for Terraform state locking"
         required: true
     outputs:
       cloudfront_distribution_id:
-        description: "CloudFront distribution ID (from terraform output)"
+        description: "CloudFront distribution ID (populated after apply)"
         value: ${{ jobs.terraform.outputs.cloudfront_distribution_id }}
       website_bucket_name:
-        description: "Website S3 bucket name (from terraform output)"
+        description: "Website S3 bucket name (populated after apply)"
         value: ${{ jobs.terraform.outputs.website_bucket_name }}
 
-permissions:
-  id-token: write   # Required for OIDC
-  contents: read
+# Permissions are set on the CALLER workflow, not here.
+# Reusable workflows inherit the caller's permissions.
 
 jobs:
   terraform:
-    name: Terraform ${{ inputs.apply && 'Apply' || 'Plan' }} (${{ inputs.environment }})
+    name: Terraform ${{ inputs.apply && 'Apply' || 'Plan' }}
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+
+    # Scoped to the GitHub environment named "dev" — allows environment
+    # protection rules and environment-level secret overrides if needed.
+    environment: dev
 
     outputs:
-      cloudfront_distribution_id: ${{ steps.outputs.outputs.cloudfront_distribution_id }}
-      website_bucket_name: ${{ steps.outputs.outputs.website_bucket_name }}
+      cloudfront_distribution_id: ${{ steps.tf-outputs.outputs.cloudfront_distribution_id }}
+      website_bucket_name: ${{ steps.tf-outputs.outputs.website_bucket_name }}
 
     defaults:
       run:
@@ -74,19 +72,20 @@ jobs:
         with:
           role-to-assume: ${{ secrets.TF_ROLE_ARN }}
           aws-region: ${{ inputs.aws_region }}
-          role-session-name: github-actions-terraform-${{ inputs.environment }}
+          role-session-name: github-actions-terraform
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "~1.9"
-          terraform_wrapper: false   # Disable wrapper so outputs can be parsed cleanly
+          # Disable the wrapper — it wraps stdout which breaks `terraform output -raw`
+          terraform_wrapper: false
 
       - name: Terraform Init
         run: |
           terraform init \
             -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
-            -backend-config="key=${{ secrets.TF_STATE_KEY }}" \
+            -backend-config="key=terraform.tfstate" \
             -backend-config="region=${{ inputs.aws_region }}" \
             -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}" \
             -backend-config="encrypt=true"
@@ -106,7 +105,7 @@ jobs:
       - name: Upload plan artifact
         uses: actions/upload-artifact@v4
         with:
-          name: tfplan-${{ inputs.environment }}-${{ github.run_id }}
+          name: tfplan-${{ github.run_id }}
           path: |
             ${{ inputs.working_directory }}/tfplan
             ${{ inputs.working_directory }}/plan.txt
@@ -117,7 +116,7 @@ jobs:
         run: terraform apply -auto-approve tfplan
 
       - name: Capture Terraform outputs
-        id: outputs
+        id: tf-outputs
         if: inputs.apply == true
         run: |
           echo "cloudfront_distribution_id=$(terraform output -raw cloudfront_distribution_id)" >> "$GITHUB_OUTPUT"

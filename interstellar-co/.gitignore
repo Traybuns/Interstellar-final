@@ -1,29 +1,21 @@
-# ── Terraform ────────────────────────────────────────────────
+# Terraform
 .terraform/
 .terraform.lock.hcl
 *.tfstate
 *.tfstate.backup
-*.tfplan
-crash.log
-crash.*.log
+tfplan
+
+# Sensitive variable files — never commit secrets
+*.auto.tfvars
 override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
 
-# ── tfvars — may contain sensitive values ────────────────────
-# Comment out the next line if you intentionally commit tfvars
-# (this project's tfvars contain no secrets, so committing is safe)
-# *.tfvars
+# Local plan output
+plan.txt
 
-# ── OS / Editor ───────────────────────────────────────────────
+# OS / editor
 .DS_Store
-Thumbs.db
 .vscode/
 .idea/
-*.swp
-*.swo
-
-# ── Environment ───────────────────────────────────────────────
-.env
-.env.*

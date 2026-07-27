@@ -1,19 +1,16 @@
 # ── .github/workflows/_deploy.yml ────────────────────────────
 # Reusable workflow: sync website files to S3 and invalidate CloudFront.
 #
-# Called after terraform apply succeeds. Not triggered directly.
+# Called by deploy.yml after terraform apply succeeds.
+# Not triggered directly.
 
 name: Deploy website (reusable)
 
 on:
   workflow_call:
     inputs:
-      environment:
-        description: "Target environment (dev | staging | prod)"
-        required: true
-        type: string
       aws_region:
-        description: "AWS region for the environment"
+        description: "AWS region for the deployment"
         required: true
         type: string
       website_bucket_name:
@@ -25,24 +22,20 @@ on:
         required: true
         type: string
       source_dir:
-        description: "Local directory of website files to upload"
+        description: "Local path to the directory containing website files"
         required: false
         type: string
-        default: "website"
+        default: "interstellar-co/website"
     secrets:
       DEPLOY_ROLE_ARN:
-        description: "ARN of the IAM role to assume for S3 + CloudFront operations"
+        description: "IAM role ARN to assume for S3 + CloudFront operations (OIDC)"
         required: true
-
-permissions:
-  id-token: write
-  contents: read
 
 jobs:
   deploy:
-    name: Deploy website (${{ inputs.environment }})
+    name: Deploy website
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    environment: dev
 
     steps:
       - name: Checkout
@@ -53,9 +46,12 @@ jobs:
         with:
           role-to-assume: ${{ secrets.DEPLOY_ROLE_ARN }}
           aws-region: ${{ inputs.aws_region }}
-          role-session-name: github-actions-deploy-${{ inputs.environment }}
+          role-session-name: github-actions-deploy
 
-      - name: Sync website files to S3
+      # Two-pass sync:
+      #   Pass 1 — assets (CSS, JS, fonts, images): long-lived immutable cache.
+      #   Pass 2 — HTML + JSON: no-cache so users always get the latest content.
+      - name: Sync website assets to S3
         run: |
           aws s3 sync "${{ inputs.source_dir }}/" "s3://${{ inputs.website_bucket_name }}/" \
             --delete \
@@ -63,7 +59,8 @@ jobs:
             --exclude "*.html" \
             --exclude "*.json"
 
-          # HTML and JSON get a shorter TTL so users get fresh content on deploy
+      - name: Sync HTML and JSON to S3
+        run: |
           aws s3 sync "${{ inputs.source_dir }}/" "s3://${{ inputs.website_bucket_name }}/" \
             --delete \
             --cache-control "no-cache, no-store, must-revalidate" \

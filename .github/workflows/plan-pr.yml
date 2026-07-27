@@ -1,0 +1,40 @@
+# ── .github/workflows/plan-pr.yml ────────────────────────────
+# Runs terraform plan on every pull request that touches Terraform files.
+# Does NOT apply — plan output is uploaded as a workflow artifact.
+#
+# ── GitHub Secrets required ─────────────────────────────────
+#   TF_ROLE_ARN       IAM Terraform role ARN (same secret used by deploy.yml)
+#   TF_STATE_BUCKET   S3 state bucket name
+#   TF_LOCK_TABLE     DynamoDB lock table name
+
+name: Plan (PR)
+
+on:
+  pull_request:
+    paths:
+      - "interstellar-co/**/*.tf"
+      - "interstellar-co/**/*.tfvars"
+      - ".github/workflows/plan-pr.yml"
+      - ".github/workflows/_terraform.yml"
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write   # Allows posting plan output as a PR comment (future enhancement)
+
+concurrency:
+  group: plan-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    name: Terraform plan
+    uses: ./.github/workflows/_terraform.yml
+    with:
+      working_directory: interstellar-co
+      aws_region: eu-north-1
+      apply: false
+    secrets:
+      TF_ROLE_ARN: ${{ secrets.TF_ROLE_ARN }}
+      TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+      TF_LOCK_TABLE: ${{ secrets.TF_LOCK_TABLE }}
